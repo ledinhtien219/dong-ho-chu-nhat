@@ -1,1 +1,75 @@
+name: Build ESP32 Firmware
 
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Phiên bản phát hành, ví dụ v1.0.0"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Lấy mã nguồn
+        uses: actions/checkout@v4
+
+      - name: Cài Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Cài ESP32 Core
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      - name: Cài thư viện
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "lvgl@8.3.11"
+          arduino-cli lib install "Adafruit GFX Library"
+          arduino-cli lib install "Adafruit ILI9341"
+          arduino-cli lib install "Adafruit AHTX0"
+          arduino-cli lib install "ArduinoJson"
+
+      - name: Chuẩn bị LVGL và sketch
+        run: |
+          cp lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
+          mkdir -p build-sketch/ESP32_ILI9341_AHT10_Pro
+          cp ESP32_ILI9341_AHT10_Pro.ino build-sketch/ESP32_ILI9341_AHT10_Pro/
+          cp ui_font_*.c build-sketch/ESP32_ILI9341_AHT10_Pro/
+
+      - name: Biên dịch firmware
+        run: |
+          mkdir -p output
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs \
+            --output-dir output \
+            build-sketch/ESP32_ILI9341_AHT10_Pro
+          cp output/ESP32_ILI9341_AHT10_Pro.ino.bin firmware.bin
+
+      - name: Lưu firmware build
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: firmware.bin
+
+      - name: Tạo GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" firmware.bin --clobber
+          else
+            gh release create "$VERSION" firmware.bin \
+              --title "Smart Clock $VERSION" \
+              --generate-notes
+          fi
