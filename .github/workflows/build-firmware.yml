@@ -1,12 +1,19 @@
 name: Build ESP32 Firmware
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "*.ino"
+      - "ui_font_*.c"
+      - "lv_conf.h"
+      - ".github/workflows/build-firmware.yml"
   workflow_dispatch:
     inputs:
       version:
-        description: "Phiên bản phát hành, ví dụ v1.0.0"
-        required: true
-        default: "v1.0.0"
+        description: "Phiên bản, ví dụ v1.0.0; để trống sẽ tự tăng"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -25,8 +32,7 @@ jobs:
       - name: Cài ESP32 Core
         run: |
           arduino-cli config init
-          arduino-cli config add board_manager.additional_urls \
-            https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
@@ -55,16 +61,30 @@ jobs:
             build-sketch/ESP32_ILI9341_AHT10_Pro
           cp output/ESP32_ILI9341_AHT10_Pro.ino.bin firmware.bin
 
+      - name: Kiểm tra file firmware
+        run: |
+          test -s firmware.bin
+          ls -lh firmware.bin
+
       - name: Lưu firmware build
         uses: actions/upload-artifact@v4
         with:
           name: firmware
           path: firmware.bin
 
+      - name: Xác định phiên bản
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "VERSION=$INPUT_VERSION" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=v0.1.${{ github.run_number }}" >> "$GITHUB_ENV"
+          fi
+
       - name: Tạo GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
         run: |
           if gh release view "$VERSION" >/dev/null 2>&1; then
             gh release upload "$VERSION" firmware.bin --clobber
